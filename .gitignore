@@ -1,0 +1,36 @@
+# Android
+/build/
+**/build/
+*.iml
+.externalNativeBuild
+.cxx
+/captures
+
+# Gradle
+.gradle/
+# gradle.properties no longer contains secrets (moved to local.properties).
+# It can be tracked for project-wide Gradle JVM/cache settings.
+# gradle.properties 
+
+# Machine-specific / Secret properties
+local.properties
+
+# IntelliJ/Android Studio
+.idea/
+*.iws
+*.out
+/out
+
+# Secrets & Keys (CRITICAL)
+key/
+*.jks
+*.keystore
+*_client_secret_*.json
+google-services.json
+
+# Kotlin
+.kotlin/
+
+# OS
+.DS_Store
+Thumbs.db

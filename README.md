@@ -40,13 +40,12 @@ DongDiary는 소중한 일상을 기록하고, 과거의 오늘을 추억할 수
   RELEASE_KEY_ALIAS={당신의 키 별칭}
   RELEASE_KEY_PASSWORD={당신의 키 비밀번호}
   ```
-- **google-services.json**: 구글 로그인을 사용하기 위해 Firebase/Google Cloud Console에서 발급받은 `google-services.json` 파일이 `app/` 폴더 내에 필요합니다.
 
 ### 3. 빌드 및 테스트
 - 프로젝트를 로드한 후 `npm run dev` (Gradle Sync) 과정을 거쳐 실행합니다.
 
 ## 📄 라이선스
-이 프로젝트는 팀 내부용 또는 개인 학습용으로 작성되었습니다.
+저 개인이 재미와 학습을 위해 만든 것으로 그 누구나 사용하셔도 상관 없습니다. 아아키텍처 이런건 젼허 없습니다 ㅎㅎ
 
 ---
 Created by [doptsw]

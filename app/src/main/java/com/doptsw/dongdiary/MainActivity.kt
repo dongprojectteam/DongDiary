@@ -2,10 +2,10 @@
 
 package com.doptsw.dongdiary
 
-import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -13,6 +13,7 @@ import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,11 +28,14 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,6 +51,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -85,6 +92,7 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.request.ImageRequest
 import androidx.compose.ui.layout.ContentScale
+import java.security.MessageDigest
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -99,12 +107,36 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DongDiaryApp() {
     DongDiaryTheme {
-        val navController = rememberNavController()
+        val context = LocalContext.current
+        val settingsRepository = remember { SettingsRepository(context) }
+        var currentSettings by remember { mutableStateOf<UserSettings?>(null) }
+        var isUnlockedInSession by remember { mutableStateOf(false) }
+
+        LaunchedEffect(Unit) {
+            currentSettings = settingsRepository.settingsFlow.first()
+        }
+
         Surface(
             modifier = Modifier.fillMaxSize(),
-            color = MaterialTheme.colorScheme.background
+            color = MaterialTheme.colorScheme.background,
         ) {
-            DongDiaryNavHost(navController = navController)
+            val loadedSettings = currentSettings
+            if (loadedSettings == null) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(text = "로딩 중...")
+                }
+            } else if (settingsRepository.hasPasscode(loadedSettings) && !isUnlockedInSession) {
+                LockScreen(
+                    passcodeHash = loadedSettings.passcodeHash.orEmpty(),
+                    onUnlockSuccess = { isUnlockedInSession = true },
+                )
+            } else {
+                val navController = rememberNavController()
+                DongDiaryNavHost(navController = navController)
+            }
         }
     }
 }
@@ -158,9 +190,12 @@ fun HomeScreen(
     var currentYearMonth by remember { mutableStateOf(LocalDate.now().withDayOfMonth(1)) }
     var selectedDate by remember { mutableStateOf(today) }
     var entries by remember { mutableStateOf(emptyList<DiaryEntry>()) }
+    var recentEntries by remember { mutableStateOf(emptyList<DiaryEntry>()) }
+    var visibleRecentCount by remember { mutableStateOf(10) }
 
     LaunchedEffect(Unit) {
         entries = repository.getAll().entries
+        recentEntries = repository.getAllSortedByUpdatedAtDesc()
     }
 
     val entriesById = remember(entries) {
@@ -284,6 +319,45 @@ fun HomeScreen(
                             onOpenDay(date.toString())
                         },
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = "최근 일기",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        if (recentEntries.isEmpty()) {
+            Text(
+                text = "최근 일기가 없습니다.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 240.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                lazyItems(recentEntries.take(visibleRecentCount)) { entry ->
+                    RecentDiaryItem(
+                        entry = entry,
+                        onClick = { onOpenDay(entry.date) },
+                    )
+                }
+            }
+
+            if (recentEntries.size > visibleRecentCount) {
+                Spacer(modifier = Modifier.height(8.dp))
+                TextButton(
+                    onClick = { visibleRecentCount += 10 },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(text = "더 보기")
                 }
             }
         }
@@ -988,6 +1062,9 @@ fun SettingsScreen(
     var settings by remember {
         mutableStateOf(UserSettings())
     }
+    var showAddPasscodeDialog by remember { mutableStateOf(false) }
+    var showChangePasscodeDialog by remember { mutableStateOf(false) }
+    var showRemovePasscodeDialog by remember { mutableStateOf(false) }
 
     val googleSignInOptions = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -1003,7 +1080,7 @@ fun SettingsScreen(
         GoogleSignIn.getClient(context, googleSignInOptions)
     }
 
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
 
     val snackBarHostState = remember { androidx.compose.material3.SnackbarHostState() }
 
@@ -1220,6 +1297,52 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // 앱 버전 표시
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Text(
+                text = "비밀번호",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            if (repository.hasPasscode(settings)) {
+                Text(
+                    text = "앱 시작 시 4자리 비밀번호를 입력해야 합니다.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Button(
+                        onClick = { showChangePasscodeDialog = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(text = "비밀번호 수정")
+                    }
+                    Button(
+                        onClick = { showRemovePasscodeDialog = true },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(text = "비밀번호 삭제")
+                    }
+                }
+            } else {
+                Text(
+                    text = "현재 비밀번호가 없습니다.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = { showAddPasscodeDialog = true },
+                ) {
+                    Text(text = "비밀번호 추가")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
             val versionName = remember {
                 val pm = context.packageManager
                 val pkg = context.packageName
@@ -1245,6 +1368,350 @@ fun SettingsScreen(
                     .padding(top = 4.dp),
             )
         }
+    }
+    if (showAddPasscodeDialog) {
+        PasscodeAddDialog(
+            onDismiss = { showAddPasscodeDialog = false },
+            onConfirm = { newPin ->
+                scope.launch {
+                    val hash = hashPin(newPin)
+                    repository.setPasscodeHash(hash)
+                    settings = settings.copy(passcodeHash = hash)
+                    showAddPasscodeDialog = false
+                    snackBarHostState.showSnackbar("비밀번호가 설정되었습니다.")
+                }
+            },
+        )
+    }
+
+    if (showChangePasscodeDialog) {
+        PasscodeChangeDialog(
+            onDismiss = { showChangePasscodeDialog = false },
+            currentHash = settings.passcodeHash.orEmpty(),
+            onConfirm = { newPin ->
+                scope.launch {
+                    val hash = hashPin(newPin)
+                    repository.setPasscodeHash(hash)
+                    settings = settings.copy(passcodeHash = hash)
+                    showChangePasscodeDialog = false
+                    snackBarHostState.showSnackbar("비밀번호가 변경되었습니다.")
+                }
+            },
+        )
+    }
+
+    if (showRemovePasscodeDialog) {
+        PasscodeRemoveDialog(
+            onDismiss = { showRemovePasscodeDialog = false },
+            currentHash = settings.passcodeHash.orEmpty(),
+            onConfirm = {
+                scope.launch {
+                    repository.clearPasscodeHash()
+                    settings = settings.copy(passcodeHash = null)
+                    showRemovePasscodeDialog = false
+                    snackBarHostState.showSnackbar("비밀번호가 삭제되었습니다.")
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun LockScreen(
+    passcodeHash: String,
+    onUnlockSuccess: () -> Unit,
+) {
+    var pin by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(text = "앱 잠금", style = MaterialTheme.typography.titleLarge)
+            Text(text = "4자리 비밀번호를 입력하세요.", style = MaterialTheme.typography.bodyMedium)
+            OutlinedTextField(
+                value = pin,
+                onValueChange = {
+                    pin = sanitizePin(it)
+                    errorMessage = null
+                },
+                label = { Text("비밀번호") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage.orEmpty(),
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Button(
+                onClick = {
+                    if (!isValidPin(pin)) {
+                        errorMessage = "비밀번호는 숫자 4자리여야 합니다."
+                    } else if (hashPin(pin) != passcodeHash) {
+                        errorMessage = "비밀번호가 올바르지 않습니다."
+                    } else {
+                        onUnlockSuccess()
+                    }
+                },
+                enabled = isValidPin(pin),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(text = "확인")
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecentDiaryItem(
+    entry: DiaryEntry,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.medium,
+            )
+            .clickable { onClick() }
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = entry.date,
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Text(
+            text = entry.content.ifBlank { "(내용 없음)" },
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            text = "수정: ${formatUpdatedAt(entry.updatedAt)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun PasscodeAddDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit,
+) {
+    var newPin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                when {
+                    !isValidPin(newPin) -> error = "새 비밀번호는 숫자 4자리여야 합니다."
+                    newPin != confirmPin -> error = "비밀번호 확인이 일치하지 않습니다."
+                    else -> onConfirm(newPin)
+                }
+            }) { Text(text = "저장") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(text = "취소") }
+        },
+        title = { Text(text = "비밀번호 추가") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = newPin,
+                    onValueChange = {
+                        newPin = sanitizePin(it)
+                        error = null
+                    },
+                    label = { Text("새 비밀번호") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = confirmPin,
+                    onValueChange = {
+                        confirmPin = sanitizePin(it)
+                        error = null
+                    },
+                    label = { Text("비밀번호 확인") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                if (error != null) {
+                    Text(
+                        text = error.orEmpty(),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun PasscodeChangeDialog(
+    onDismiss: () -> Unit,
+    currentHash: String,
+    onConfirm: (String) -> Unit,
+) {
+    var currentPin by remember { mutableStateOf("") }
+    var newPin by remember { mutableStateOf("") }
+    var confirmPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                when {
+                    hashPin(currentPin) != currentHash -> error = "현재 비밀번호가 올바르지 않습니다."
+                    !isValidPin(newPin) -> error = "새 비밀번호는 숫자 4자리여야 합니다."
+                    newPin != confirmPin -> error = "비밀번호 확인이 일치하지 않습니다."
+                    else -> onConfirm(newPin)
+                }
+            }) { Text(text = "변경") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(text = "취소") }
+        },
+        title = { Text(text = "비밀번호 수정") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = currentPin,
+                    onValueChange = {
+                        currentPin = sanitizePin(it)
+                        error = null
+                    },
+                    label = { Text("현재 비밀번호") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = newPin,
+                    onValueChange = {
+                        newPin = sanitizePin(it)
+                        error = null
+                    },
+                    label = { Text("새 비밀번호") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = confirmPin,
+                    onValueChange = {
+                        confirmPin = sanitizePin(it)
+                        error = null
+                    },
+                    label = { Text("비밀번호 확인") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                if (error != null) {
+                    Text(
+                        text = error.orEmpty(),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun PasscodeRemoveDialog(
+    onDismiss: () -> Unit,
+    currentHash: String,
+    onConfirm: () -> Unit,
+) {
+    var currentPin by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = {
+                if (hashPin(currentPin) != currentHash) {
+                    error = "현재 비밀번호가 올바르지 않습니다."
+                } else {
+                    onConfirm()
+                }
+            }) { Text(text = "삭제") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(text = "취소") }
+        },
+        title = { Text(text = "비밀번호 삭제") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = "현재 비밀번호를 입력하세요.")
+                OutlinedTextField(
+                    value = currentPin,
+                    onValueChange = {
+                        currentPin = sanitizePin(it)
+                        error = null
+                    },
+                    label = { Text("현재 비밀번호") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    singleLine = true,
+                )
+                if (error != null) {
+                    Text(
+                        text = error.orEmpty(),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+    )
+}
+
+private fun sanitizePin(input: String): String {
+    return input.filter { it.isDigit() }.take(4)
+}
+
+private fun isValidPin(pin: String): Boolean {
+    return pin.length == 4 && pin.all { it.isDigit() }
+}
+
+private fun hashPin(pin: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(pin.toByteArray())
+    return digest.joinToString("") { "%02x".format(it) }
+}
+
+private fun formatUpdatedAt(updatedAt: String): String {
+    return runCatching {
+        val parsed = java.time.LocalDateTime.parse(updatedAt)
+        "${parsed.toLocalDate()} ${parsed.toLocalTime().withSecond(0).withNano(0)}"
+    }.getOrElse {
+        updatedAt.take(16)
     }
 }
 

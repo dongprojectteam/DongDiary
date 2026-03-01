@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,7 +15,7 @@ android {
 
     signingConfigs {
         create("release") {
-            val localProperties = java.util.Properties().apply {
+            val localProperties = Properties().apply {
                 val localFile = rootProject.file("local.properties")
                 if (localFile.exists()) {
                     localFile.inputStream().use { load(it) }
@@ -43,7 +45,7 @@ android {
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "v1.0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -9,6 +9,17 @@ class DiaryRepository(
 
     fun getAll(): DiaryFile = store.load()
 
+    fun getAllSortedByUpdatedAtDesc(): List<DiaryEntry> {
+        val formatter = java.time.format.DateTimeFormatter.ISO_DATE_TIME
+        return store.load().entries.sortedWith(
+            compareByDescending<DiaryEntry> { entry ->
+                runCatching { LocalDateTime.parse(entry.updatedAt, formatter) }.getOrNull()
+            }.thenByDescending { entry ->
+                runCatching { LocalDate.parse(entry.date) }.getOrNull()
+            }.thenByDescending { it.updatedAt }
+        )
+    }
+
     fun getEntriesForDate(date: LocalDate): List<DiaryEntry> {
         val id = date.toString()
         return store.load().entries.filter { it.id == id }

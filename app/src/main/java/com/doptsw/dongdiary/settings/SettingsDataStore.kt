@@ -18,6 +18,7 @@ data class UserSettings(
     val googleDisplayName: String? = null,
     val googleEmail: String? = null,
     val autoBackupOnExit: Boolean = false,
+    val passcodeHash: String? = null,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "dong_diary_settings")
@@ -28,6 +29,7 @@ private object SettingsKeys {
     val GOOGLE_DISPLAY_NAME: Preferences.Key<String> = stringPreferencesKey("google_display_name")
     val GOOGLE_EMAIL: Preferences.Key<String> = stringPreferencesKey("google_email")
     val AUTO_BACKUP_ON_EXIT: Preferences.Key<Boolean> = booleanPreferencesKey("auto_backup_on_exit")
+    val PASSCODE_HASH: Preferences.Key<String> = stringPreferencesKey("passcode_hash")
 }
 
 class SettingsRepository(
@@ -49,6 +51,7 @@ class SettingsRepository(
                 googleDisplayName = prefs[SettingsKeys.GOOGLE_DISPLAY_NAME],
                 googleEmail = prefs[SettingsKeys.GOOGLE_EMAIL],
                 autoBackupOnExit = prefs[SettingsKeys.AUTO_BACKUP_ON_EXIT] ?: false,
+                passcodeHash = prefs[SettingsKeys.PASSCODE_HASH],
             )
         }
 
@@ -70,6 +73,22 @@ class SettingsRepository(
             prefs[SettingsKeys.GOOGLE_DISPLAY_NAME] = displayName.orEmpty()
             prefs[SettingsKeys.GOOGLE_EMAIL] = email.orEmpty()
         }
+    }
+
+    suspend fun setPasscodeHash(hash: String) {
+        context.dataStore.edit { prefs ->
+            prefs[SettingsKeys.PASSCODE_HASH] = hash
+        }
+    }
+
+    suspend fun clearPasscodeHash() {
+        context.dataStore.edit { prefs ->
+            prefs.remove(SettingsKeys.PASSCODE_HASH)
+        }
+    }
+
+    fun hasPasscode(settings: UserSettings): Boolean {
+        return !settings.passcodeHash.isNullOrBlank()
     }
 }
 

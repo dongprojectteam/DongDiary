@@ -42,6 +42,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +95,9 @@ import coil.compose.SubcomposeAsyncImage
 import coil.compose.SubcomposeAsyncImageContent
 import coil.request.ImageRequest
 import androidx.compose.ui.layout.ContentScale
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import java.security.MessageDigest
 
 class MainActivity : ComponentActivity() {
@@ -109,13 +113,44 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun DongDiaryApp() {
     DongDiaryTheme {
+        val activity = LocalActivity.current as? ComponentActivity
         val context = LocalContext.current
+        val lifecycleOwner = LocalLifecycleOwner.current
         val settingsRepository = remember { SettingsRepository(context) }
         var currentSettings by remember { mutableStateOf<UserSettings?>(null) }
         var isUnlockedInSession by remember { mutableStateOf(false) }
+        var shouldLockOnResume by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
             currentSettings = settingsRepository.settingsFlow.first()
+        }
+
+        DisposableEffect(lifecycleOwner, activity, currentSettings) {
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_STOP -> {
+                        if (activity?.isChangingConfigurations != true) {
+                            shouldLockOnResume = true
+                        }
+                    }
+                    Lifecycle.Event.ON_RESUME -> {
+                        val loadedSettings = currentSettings
+                        if (
+                            shouldLockOnResume &&
+                            loadedSettings != null &&
+                            settingsRepository.hasPasscode(loadedSettings)
+                        ) {
+                            isUnlockedInSession = false
+                        }
+                        shouldLockOnResume = false
+                    }
+                    else -> Unit
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
         }
 
         Surface(

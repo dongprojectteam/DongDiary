@@ -35,16 +35,19 @@ class DiaryRepository(
     }
 
     fun saveOrUpdateToday(content: String, images: List<DiaryImage> = emptyList()) {
-        val today = LocalDate.now()
+        saveOrUpdateDate(LocalDate.now(), content, images)
+    }
+
+    fun saveOrUpdateDate(date: LocalDate, content: String, images: List<DiaryImage> = emptyList()) {
         val now = LocalDateTime.now().toString()
-        val todayId = today.toString()
+        val targetId = date.toString()
         val current = store.load()
 
-        val existing = current.entries.find { it.id == todayId }
+        val existing = current.entries.find { it.id == targetId }
         val updatedEntries = if (existing == null) {
             current.entries + DiaryEntry(
-                id = todayId,
-                date = today.toString(),
+                id = targetId,
+                date = date.toString(),
                 content = content,
                 images = images,
                 createdAt = now,
@@ -52,7 +55,7 @@ class DiaryRepository(
             )
         } else {
             current.entries.map {
-                if (it.id == todayId) {
+                if (it.id == targetId) {
                     it.copy(
                         content = content,
                         images = images,
@@ -123,11 +126,15 @@ class DiaryRepository(
     }
 
     fun deleteToday() {
-        val todayId = LocalDate.now().toString()
-        val current = store.load()
-        if (current.entries.none { it.id == todayId }) return
+        deleteByDate(LocalDate.now())
+    }
 
-        val updatedEntries = current.entries.filterNot { it.id == todayId }
+    fun deleteByDate(date: LocalDate) {
+        val targetId = date.toString()
+        val current = store.load()
+        if (current.entries.none { it.id == targetId }) return
+
+        val updatedEntries = current.entries.filterNot { it.id == targetId }
         val nextFile = current.copy(
             version = current.version + 1,
             entries = updatedEntries,

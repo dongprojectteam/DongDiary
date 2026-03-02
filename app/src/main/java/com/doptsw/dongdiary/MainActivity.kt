@@ -13,6 +13,7 @@ import androidx.activity.result.ActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -191,15 +193,19 @@ fun HomeScreen(
     var selectedDate by remember { mutableStateOf(today) }
     var entries by remember { mutableStateOf(emptyList<DiaryEntry>()) }
     var recentEntries by remember { mutableStateOf(emptyList<DiaryEntry>()) }
-    var visibleRecentCount by remember { mutableStateOf(10) }
+    var visibleRecentMonthCount by remember { mutableStateOf(10) }
+    var expandedRecentMonthKey by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(Unit) {
         entries = repository.getAll().entries
         recentEntries = repository.getAllSortedByUpdatedAtDesc()
     }
 
-    val entriesById = remember(entries) {
-        entries.groupBy { it.id }
+        val entriesById = remember(entries) {
+            entries.groupBy { it.id }
+        }
+    val recentEntriesByMonth = remember(recentEntries) {
+        recentEntries.groupBy { it.date.take(7) }.toList()
     }
 
     Column(
@@ -207,60 +213,76 @@ fun HomeScreen(
             .fillMaxSize()
             .padding(16.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row {
-                TextButton(onClick = {
-                    currentYearMonth = currentYearMonth.minusYears(1)
-                }) {
-                    Text(text = "이전 해")
-                }
-                TextButton(onClick = {
-                    currentYearMonth = currentYearMonth.minusMonths(1)
-                }) {
-                    Text(text = "이전 달")
-                }
-            }
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "${currentYearMonth.year}년 ${currentYearMonth.monthValue}월",
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "선택한 날짜: ${selectedDate}",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                TextButton(
-                    onClick = {
-                        currentYearMonth = today.withDayOfMonth(1)
-                        selectedDate = today
-                    },
-                ) {
-                    Text(text = "오늘로 이동")
-                }
-            }
-            Row {
-                val nextMonth = currentYearMonth.plusMonths(1)
-                val canGoNextMonth = nextMonth.year < today.year ||
-                    (nextMonth.year == today.year && nextMonth.monthValue <= today.monthValue)
+        val nextMonth = currentYearMonth.plusMonths(1)
+        val canGoNextMonth = nextMonth.year < today.year ||
+            (nextMonth.year == today.year && nextMonth.monthValue <= today.monthValue)
+        val isCurrentMonth = currentYearMonth.year == today.year &&
+            currentYearMonth.monthValue == today.monthValue
 
-                TextButton(
-                    onClick = {
-                        if (canGoNextMonth) {
-                            currentYearMonth = nextMonth
-                        }
-                    },
-                    enabled = canGoNextMonth,
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            tonalElevation = 2.dp,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(text = "다음 달")
+                    Text(
+                        text = "${currentYearMonth.year}년 ${currentYearMonth.monthValue}월",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 56.dp),
+                    )
+                    TextButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                    ) {
+                        Text(text = "설정")
+                    }
                 }
-                TextButton(onClick = onOpenSettings) {
-                    Text(text = "설정")
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = {
+                        currentYearMonth = currentYearMonth.minusYears(1)
+                    }) {
+                        Text(text = "이전해", maxLines = 1)
+                    }
+                    TextButton(onClick = {
+                        currentYearMonth = currentYearMonth.minusMonths(1)
+                    }) {
+                        Text(text = "이전달", maxLines = 1)
+                    }
+                    Spacer(modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = { currentYearMonth = today.withDayOfMonth(1) },
+                        enabled = !isCurrentMonth,
+                    ) {
+                        Text(text = "이번달", maxLines = 1)
+                    }
+                    TextButton(
+                        onClick = {
+                            if (canGoNextMonth) {
+                                currentYearMonth = nextMonth
+                            }
+                        },
+                        enabled = canGoNextMonth,
+                    ) {
+                        Text(text = "다음달", maxLines = 1)
+                    }
                 }
             }
         }
@@ -301,15 +323,17 @@ fun HomeScreen(
                     }
                     val isToday = date == LocalDate.now()
                     val isFuture = date.isAfter(today)
+                    val isEditableRecentDate = !date.isBefore(today.minusDays(6)) && !isFuture
                     val hasAnyEntry = hasTodayEntry || hasHistory
                     val isClickable = when {
                         isFuture -> false
-                        isToday -> true
+                        isEditableRecentDate -> true
                         else -> hasAnyEntry
                     }
                     DayCell(
                         date = date,
                         isToday = isToday,
+                        isEditableRecentDate = isEditableRecentDate,
                         isSelected = date == selectedDate,
                         hasEntry = hasTodayEntry,
                         hasHistory = hasHistory,
@@ -343,18 +367,90 @@ fun HomeScreen(
                     .heightIn(max = 240.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                lazyItems(recentEntries.take(visibleRecentCount)) { entry ->
-                    RecentDiaryItem(
-                        entry = entry,
-                        onClick = { onOpenDay(entry.date) },
-                    )
+                lazyItems(
+                    items = recentEntriesByMonth.take(visibleRecentMonthCount),
+                    key = { it.first },
+                ) { monthGroup ->
+                    val monthKey = monthGroup.first
+                    val monthEntries = monthGroup.second
+                    val isExpanded = expandedRecentMonthKey == monthKey
+
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        tonalElevation = if (isExpanded) 2.dp else 0.dp,
+                        shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    expandedRecentMonthKey = if (isExpanded) {
+                                        null
+                                    } else {
+                                        monthKey
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = monthKey,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Text(
+                                            text = "${monthEntries.size}개의 일기 작성",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    Surface(
+                                        shape = RoundedCornerShape(999.dp),
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                    ) {
+                                        Text(
+                                            text = monthEntries.size.toString(),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.padding(4.dp))
+                                    Text(
+                                        text = if (isExpanded) "접기" else "펼치기",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+
+                            if (isExpanded) {
+                                monthEntries.forEach { entry ->
+                                    RecentDiaryItem(
+                                        entry = entry,
+                                        onClick = { onOpenDay(entry.date) },
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            if (recentEntries.size > visibleRecentCount) {
+            if (recentEntriesByMonth.size > visibleRecentMonthCount) {
                 Spacer(modifier = Modifier.height(8.dp))
                 TextButton(
-                    onClick = { visibleRecentCount += 10 },
+                    onClick = { visibleRecentMonthCount += 10 },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(text = "더 보기")
@@ -381,15 +477,16 @@ fun DayDetailScreen(
     val context = LocalContext.current
     val repository = remember { DiaryRepository(LocalJsonStore(context)) }
     val today = LocalDate.now()
+    val editableStartDate = today.minusDays(6)
     val scope = rememberCoroutineScope()
 
-    val isToday = baseDate == today
     val isPast = baseDate.isBefore(today)
+    val canEditDate = !baseDate.isBefore(editableStartDate) && !baseDate.isAfter(today)
 
-    var todayEntry by remember { mutableStateOf(repository.getEntriesForDate(today).firstOrNull()) }
-    var todayContent by remember { mutableStateOf(todayEntry?.content.orEmpty()) }
-    var todayImages by remember { mutableStateOf(todayEntry?.images.orEmpty()) }
-    var isEditingToday by remember { mutableStateOf(todayEntry == null && isToday) }
+    var todayEntry by remember(baseDate) { mutableStateOf(repository.getEntriesForDate(baseDate).firstOrNull()) }
+    var todayContent by remember(baseDate) { mutableStateOf(todayEntry?.content.orEmpty()) }
+    var todayImages by remember(baseDate) { mutableStateOf(todayEntry?.images.orEmpty()) }
+    var isEditingToday by remember(baseDate) { mutableStateOf(todayEntry == null && canEditDate) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var selectedImagePreview by remember { mutableStateOf<String?>(null) }
 
@@ -433,31 +530,34 @@ fun DayDetailScreen(
                 .fillMaxSize()
                 .imePadding(),
         ) {
-            Row(
+            Box(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.Center,
             ) {
-                TextButton(onClick = onBack) {
+                TextButton(
+                    onClick = onBack,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                ) {
                     Text(text = "뒤로")
                 }
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
                         text = "${baseDate.year}년 ${baseDate.monthValue}월 ${baseDate.dayOfMonth}일",
                         style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
                     )
                     Text(
                         text = "같은 날의 지난 일기들",
                         style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
                     )
                 }
-                Spacer(modifier = Modifier.height(0.dp))
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             // 과거 날짜: 조회 전용
-            if (isPast) {
+            if (isPast && !canEditDate) {
                 val selectedEntries = remember(baseDate) {
                     repository.getEntriesForDate(baseDate)
                 }
@@ -521,14 +621,14 @@ fun DayDetailScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                if (isToday) {
+                if (canEditDate) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f, fill = false),
                     ) {
                         Text(
-                            text = "오늘의 일기",
+                            text = "선택한 날짜의 일기",
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Spacer(modifier = Modifier.height(8.dp))
@@ -567,11 +667,11 @@ fun DayDetailScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 TextButton(onClick = { isEditingToday = true }) {
-                                    Text(text = "오늘의 일기 수정하기")
+                                    Text(text = "일기 수정하기")
                                 }
                                 if (todayEntry != null) {
                                     TextButton(onClick = { showDeleteConfirm = true }) {
-                                        Text(text = "오늘의 일기 삭제하기")
+                                        Text(text = "일기 삭제하기")
                                     }
                                 }
                             }
@@ -583,7 +683,7 @@ fun DayDetailScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 120.dp, max = 300.dp),
-                                placeholder = { Text(text = "오늘 있었던 일을 자유롭게 적어보세요.") },
+                                placeholder = { Text(text = "이 날 있었던 일을 자유롭게 적어보세요.") },
                             )
 
                             Spacer(modifier = Modifier.height(12.dp))
@@ -759,8 +859,8 @@ fun DayDetailScreen(
 
                                 Button(
                                     onClick = {
-                                        repository.saveOrUpdateToday(todayContent, todayImages)
-                                        todayEntry = repository.getEntriesForDate(today).firstOrNull()
+                                        repository.saveOrUpdateDate(baseDate, todayContent, todayImages)
+                                        todayEntry = repository.getEntriesForDate(baseDate).firstOrNull()
                                         if (todayEntry != null) {
                                             todayImages = todayEntry!!.images
                                         }
@@ -786,7 +886,7 @@ fun DayDetailScreen(
                                     onClick = { showDeleteConfirm = true },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text(text = "오늘의 일기 삭제하기")
+                                    Text(text = "일기 삭제하기")
                                 }
                             }
                         }
@@ -802,7 +902,7 @@ fun DayDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        repository.deleteToday()
+                        repository.deleteByDate(baseDate)
                         todayEntry = null
                         todayContent = ""
                         todayImages = emptyList()
@@ -817,8 +917,8 @@ fun DayDetailScreen(
                     Text(text = "취소")
                 }
             },
-            title = { Text(text = "오늘의 일기 삭제") },
-            text = { Text(text = "정말로 오늘의 일기를 삭제할까요? 이 동작은 되돌릴 수 없어요.") },
+            title = { Text(text = "일기 삭제") },
+            text = { Text(text = "정말로 이 날짜의 일기를 삭제할까요? 이 동작은 되돌릴 수 없어요.") },
         )
     }
 
@@ -1139,77 +1239,101 @@ fun SettingsScreen(
                 .padding(16.dp)
                 .fillMaxSize(),
         ) {
-            Row(
+            Box(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                contentAlignment = Alignment.Center,
             ) {
-                TextButton(onClick = onBack) {
+                TextButton(
+                    onClick = onBack,
+                    modifier = Modifier.align(Alignment.CenterStart),
+                ) {
                     Text(text = "뒤로")
                 }
                 Text(
                     text = "설정",
                     style = MaterialTheme.typography.titleLarge,
+                    textAlign = TextAlign.Center,
                 )
-                Spacer(modifier = Modifier.height(0.dp))
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Text(
-                text = "Google 계정",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        text = "Google 계정",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
 
-            if (settings.isLoggedIn) {
-                Text(
-                    text = settings.googleEmail ?: "로그인됨",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                TextButton(
-                    onClick = {
-                        googleSignInClient.signOut().addOnCompleteListener {
-                            scope.launch {
-                                repository.updateLoginState(
-                                    isLoggedIn = false,
-                                    accountId = null,
-                                    displayName = null,
-                                    email = null,
-                                )
-                                settings = settings.copy(
-                                    isLoggedIn = false,
-                                    googleAccountId = null,
-                                    googleDisplayName = null,
-                                    googleEmail = null,
-                                )
-                            }
+                    if (settings.isLoggedIn) {
+                        Text(
+                            text = settings.googleEmail ?: "로그인됨",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        TextButton(
+                            onClick = {
+                                googleSignInClient.signOut().addOnCompleteListener {
+                                    scope.launch {
+                                        repository.updateLoginState(
+                                            isLoggedIn = false,
+                                            accountId = null,
+                                            displayName = null,
+                                            email = null,
+                                        )
+                                        settings = settings.copy(
+                                            isLoggedIn = false,
+                                            googleAccountId = null,
+                                            googleDisplayName = null,
+                                            googleEmail = null,
+                                        )
+                                    }
+                                }
+                            },
+                        ) {
+                            Text(text = "로그아웃")
                         }
-                    },
-                ) {
-                    Text(text = "로그아웃")
-                }
-            } else {
-                Text(
-                    text = "로그인하지 않은 상태입니다.",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        if (activity != null) {
-                            val signInIntent = googleSignInClient.signInIntent
-                            signInLauncher.launch(signInIntent)
+                    } else {
+                        Text(
+                            text = "로그인하지 않은 상태입니다.",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                if (activity != null) {
+                                    val signInIntent = googleSignInClient.signInIntent
+                                    signInLauncher.launch(signInIntent)
+                                }
+                            },
+                        ) {
+                            Text(text = "Google 계정으로 로그인")
                         }
-                    },
-                ) {
-                    Text(text = "Google 계정으로 로그인")
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                ) {
             Text(
                 text = "백업 설정",
                 style = MaterialTheme.typography.titleMedium,
@@ -1240,7 +1364,7 @@ fun SettingsScreen(
                         }
                     },
                 ) {
-                    Text(text = "지금 백업하기")
+                    Text(text = "백업하기")
                 }
 
                 Button(
@@ -1267,7 +1391,7 @@ fun SettingsScreen(
                         }
                     },
                 ) {
-                    Text(text = "클라우드에서 불러오기")
+                    Text(text = "복구하기")
                 }
             }
 
@@ -1293,6 +1417,8 @@ fun SettingsScreen(
                     enabled = settings.isLoggedIn,
                 )
             }
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -1305,6 +1431,16 @@ fun SettingsScreen(
             )
             Spacer(modifier = Modifier.height(8.dp))
 
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(12.dp),
+                ) {
             if (repository.hasPasscode(settings)) {
                 Text(
                     text = "앱 시작 시 4자리 비밀번호를 입력해야 합니다.",
@@ -1340,6 +1476,8 @@ fun SettingsScreen(
                     Text(text = "비밀번호 추가")
                 }
             }
+                }
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
 
@@ -1360,7 +1498,7 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.outlineVariant
             )
             Text(
-                text = "버전 $versionName",
+                text = "Presented by DOPT $versionName",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -1739,6 +1877,7 @@ private fun WeekHeaderRow() {
 private fun DayCell(
     date: LocalDate,
     isToday: Boolean,
+    isEditableRecentDate: Boolean,
     isSelected: Boolean,
     hasEntry: Boolean,
     hasHistory: Boolean,
@@ -1748,6 +1887,7 @@ private fun DayCell(
     val bgColor = when {
         isSelected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
         isToday -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+        isEditableRecentDate -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f)
         else -> MaterialTheme.colorScheme.background
     }
 
